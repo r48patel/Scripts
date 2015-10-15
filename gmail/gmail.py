@@ -1,11 +1,7 @@
-#requirement.txt
-#fuzzywuzzy
-#googleAPI
-
 from __future__ import print_function
 import httplib2
 import os
-from fuzzywuzzy import fuzz
+import re
 from fuzzywuzzy import process
 from apiclient import discovery
 import oauth2client
@@ -13,12 +9,54 @@ from oauth2client import client
 from oauth2client import tools
 import base64
 import email
+import collections
+import time
+import csv
+from prettytable import PrettyTable
+import sys
 
 try:
     import argparse
     flags = argparse.ArgumentParser(parents=[tools.argparser]).parse_args()
 except ImportError:
     flags = None
+
+
+class OutputWriter(object):
+    def write(self, *row):
+        pass
+
+    def flush(self):
+        pass
+
+class TableOutputWriter(OutputWriter):
+    def __init__(self, columns, align=None):
+        align = align or {}
+
+        self.table = PrettyTable(columns)
+        self.table.align = align.get('*', 'l')
+
+        for column, alignment in align.items():
+            self.table.align[column] = alignment
+
+    def write(self, *row):
+        self.table.add_row(row)
+
+    def flush(self):
+        print(self.table)
+
+
+class CsvOutputWriter(OutputWriter):
+    def __init__(self, columns):
+        self.file = open('emails.csv', 'w')
+        self.writer = csv.writer(self.file, delimiter=',')
+        self.writer.writerow(columns)
+
+    def write(self, *row):
+        self.writer.writerow(row)
+
+    def flush(self):
+        pass
 
 SCOPES = 'https://www.googleapis.com/auth/gmail.readonly'
 CLIENT_SECRET_FILE = 'client_secret.json'
@@ -60,11 +98,15 @@ def main():
     of the user's Gmail account.
     """
 
-    email_counted = {}
+    email_counted = []
+    columns = ["Email", "Count"]
+    writer = TableOutputWriter(columns)
+    # writer = CsvOutputWriter(columns)
 
     user_id = 'me'
-    query = 'label:Junk'
-    # query = 'from:IKEA-USA@e.ikea-usa.com'
+    # query = ''
+    # query = 'label:Junk'
+    query = 'label:UNREAD'
     credentials = get_credentials()
     http = credentials.authorize(httplib2.Http())
     service = discovery.build('gmail', 'v1', http=http)
@@ -75,7 +117,6 @@ def main():
     if 'messages' in messages_response:
       messages.extend(messages_response['messages'])
 
-    print (messages_response)
 
     while 'nextPageToken' in messages_response:
       page_token = messages_response['nextPageToken']
@@ -85,25 +126,28 @@ def main():
     if not messages:
         print ('No Emails found.')
     else:
-        print ('Emails found')
+        print (str(len(messages)) + ' Emails found')
         for message_id in messages:
             headers = service.users().messages().get(userId=user_id, id=message_id['id']).execute()['payload']['headers']
-            headers_dict = {item for header in headers}
-            findings = process.extract("From", headers, limit=5)
-            print (findings)
-            #print(header['value'] for header in headers if header['name'] == 'From')
             for header in headers:
                 if header['name'] == 'From':
-                    email_from = (header['value'])
-                    print (email_from)
-                    if email_from in email_counted:
-                        count = email_counted[email_from];
-                        email_counted[email_from] = count + 1
-                    else:
-                        email_counted[email_from] = 1
+                    try:
+                        email_from = (re.findall(r'(<.*>)', header['value'])[0].replace("<", "").replace(">", ""))
+                    except IndexError:
+                        email_from = (header['value'])
 
-    for entry in email_counted:
-        print (entry)
+                    print ('Checking email #' + str(len(email_counted)+1), end='')
+                    print ('\r', end='')
+                    sys.stdout.flush()
+
+                    email_counted.append(email_from)
+
+    print ()
+    test = collections.Counter(email_counted)
+    for entry in test.keys():
+        writer.write(entry, test[entry])
+
+    writer.flush()
 
 if __name__ == '__main__':
     main()
