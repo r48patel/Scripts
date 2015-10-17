@@ -14,13 +14,7 @@ import time
 import csv
 from prettytable import PrettyTable
 import sys
-
-try:
-    import argparse
-    flags = argparse.ArgumentParser(parents=[tools.argparser]).parse_args()
-except ImportError:
-    flags = None
-
+import argparse
 
 class OutputWriter(object):
     def write(self, *row):
@@ -47,8 +41,8 @@ class TableOutputWriter(OutputWriter):
 
 
 class CsvOutputWriter(OutputWriter):
-    def __init__(self, columns):
-        self.file = open('emails.csv', 'w')
+    def __init__(self, columns, fileName):
+        self.file = open(fileName, 'w')
         self.writer = csv.writer(self.file, delimiter=',')
         self.writer.writerow(columns)
 
@@ -56,7 +50,8 @@ class CsvOutputWriter(OutputWriter):
         self.writer.writerow(row)
 
     def flush(self):
-        pass
+        print(self.file.name + ' written.')
+        self.file.close()
 
 SCOPES = 'https://www.googleapis.com/auth/gmail.readonly'
 CLIENT_SECRET_FILE = 'client_secret.json'
@@ -98,15 +93,30 @@ def main():
     of the user's Gmail account.
     """
 
+    parser = argparse.ArgumentParser('gmail')
+    parser.add_argument('--query',
+                        help=('Queries you want to for for gmail.'))
+    parser.add_argument('--output',
+                        help=('which style of output. '
+                              '(default: %(default)s)'),
+                        choices=['table', 'csv'], default='table')
+    parser.add_argument('--file-name', 
+                        help=('Whad do you want to name the output file. '
+                              '(default: %(default)s))'),
+                        default='emails.csv')
+    args = parser.parse_args()
+
+
     email_counted = []
-    columns = ["Email", "Count"]
-    writer = TableOutputWriter(columns)
-    # writer = CsvOutputWriter(columns)
+    columns = ["Email", "Count", "Action"]
+    
+    if args.output == 'csv':
+        writer = CsvOutputWriter(columns, args.file_name)
+    else:
+        writer = TableOutputWriter(columns)
 
     user_id = 'me'
-    # query = ''
-    # query = 'label:Junk'
-    query = 'label:UNREAD'
+    query = args.query
     credentials = get_credentials()
     http = credentials.authorize(httplib2.Http())
     service = discovery.build('gmail', 'v1', http=http)
@@ -126,7 +136,7 @@ def main():
     if not messages:
         print ('No Emails found.')
     else:
-        print (str(len(messages)) + ' Emails found')
+        # print (str(len(messages)) + ' Emails found')
         for message_id in messages:
             headers = service.users().messages().get(userId=user_id, id=message_id['id']).execute()['payload']['headers']
             for header in headers:
@@ -136,7 +146,7 @@ def main():
                     except IndexError:
                         email_from = (header['value'])
 
-                    print ('Checking email #' + str(len(email_counted)+1), end='')
+                    print ('Checking email ' + str(len(email_counted)+1) + '/' + str(len(messages)), end='')
                     print ('\r', end='')
                     sys.stdout.flush()
 
@@ -145,7 +155,7 @@ def main():
     print ()
     test = collections.Counter(email_counted)
     for entry in test.keys():
-        writer.write(entry, test[entry])
+        writer.write(entry, test[entry], '')
 
     writer.flush()
 
