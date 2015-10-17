@@ -15,6 +15,10 @@ import csv
 from prettytable import PrettyTable
 import sys
 import argparse
+import threading
+
+
+email_list = []
 
 class OutputWriter(object):
     def write(self, *row):
@@ -39,7 +43,6 @@ class TableOutputWriter(OutputWriter):
     def flush(self):
         print(self.table)
 
-
 class CsvOutputWriter(OutputWriter):
     def __init__(self, columns, fileName):
         self.file = open(fileName, 'w')
@@ -52,6 +55,30 @@ class CsvOutputWriter(OutputWriter):
     def flush(self):
         print(self.file.name + ' written.')
         self.file.close()
+
+class appendList (threading.Thread):
+    def __init__(self, user_id, message_list):
+        threading.Thread.__init__(self)
+        self.user_id = user_id
+        self.service = discovery.build('gmail', 'v1', http=get_credentials().authorize(httplib2.Http()))
+        self.message_list = message_list
+    
+    def run(self):
+        global email_list
+
+        if self.message_list:
+            for message_id in self.message_list:
+                headers = self.service.users().messages().get(userId=self.user_id, id=message_id['id']).execute()['payload']['headers']
+                for header in headers:
+                    if header['name'] == 'From':
+                        try:
+                            email_from = (re.findall(r'(<.*>)', header['value'])[0].replace("<", "").replace(">", ""))
+                        except IndexError:
+                            email_from = (header['value'])
+
+                        email_list.append(email_from)
+        
+
 
 SCOPES = 'https://www.googleapis.com/auth/gmail.readonly'
 CLIENT_SECRET_FILE = 'client_secret.json'
@@ -85,6 +112,7 @@ def get_credentials():
             credentials = tools.run(flow, store)
         print('Storing credentials to ' + credential_path)
     return credentials
+
 
 def main():
     """Shows basic usage of the Gmail API.
@@ -123,41 +151,32 @@ def main():
 
     messages_response = service.users().messages().list(userId=user_id,q=query).execute()
 
-    messages = []
+    thread_list = []
     if 'messages' in messages_response:
-      messages.extend(messages_response['messages'])
-
+        thread = appendList(user_id, messages_response['messages'])
+        thread_list.append(thread)
+        thread.start()
 
     while 'nextPageToken' in messages_response:
-      page_token = messages_response['nextPageToken']
-      messages_response = service.users().messages().list(userId=user_id,q=query,pageToken=page_token).execute()
-      messages.extend(messages_response['messages'])
+        page_token = messages_response['nextPageToken']
+        messages_response = service.users().messages().list(userId=user_id,q=query,pageToken=page_token).execute()
+        thread = appendList(user_id, messages_response['messages'])
+        thread_list.append(thread)
+        thread.start()
 
-    if not messages:
-        print ('No Emails found.')
-    else:
-        # print (str(len(messages)) + ' Emails found')
-        for message_id in messages:
-            headers = service.users().messages().get(userId=user_id, id=message_id['id']).execute()['payload']['headers']
-            for header in headers:
-                if header['name'] == 'From':
-                    try:
-                        email_from = (re.findall(r'(<.*>)', header['value'])[0].replace("<", "").replace(">", ""))
-                    except IndexError:
-                        email_from = (header['value'])
+    for t in thread_list:
+    #     t.join()
+        while t.isAlive():
+            print ('Checking email #' + str(len(email_list)+1), end='')
+            print ('\r', end='')
+            sys.stdout.flush()
 
-                    print ('Checking email ' + str(len(email_counted)+1) + '/' + str(len(messages)), end='')
-                    print ('\r', end='')
-                    sys.stdout.flush()
-
-                    email_counted.append(email_from)
-
-    print ()
-    test = collections.Counter(email_counted)
+    test = collections.Counter(email_list)
     for entry in test.keys():
         writer.write(entry, test[entry], '')
 
     writer.flush()
+    print ('Total emails found: ' + str(len(email_list)))
 
 if __name__ == '__main__':
     main()
