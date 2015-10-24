@@ -1,2 +1,1 @@
-# scripts
-##Gmail Tool
+# Gmail Tool

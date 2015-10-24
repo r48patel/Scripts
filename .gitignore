@@ -58,3 +58,5 @@ target/
 
 # Files from gmail.py
 *.csv
+test.py
+client_secret*.json
