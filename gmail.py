@@ -260,12 +260,13 @@ def main():
         add_label_list = []
         remove_label_list = []
         subject_included = False
-        
+        counter = 0
         for line in readFile:
+            counter += 1
             if 'Subject' in line:
                 subject_included=True 
                 continue
-
+            print "Processing line: %s " % counter
             if subject_included:
                 message_id=line[0]
                 email=line[1]
@@ -291,6 +292,7 @@ def main():
                 print(' email: ' + email)
                 print(' subject: ' + subject)
                 print('') #Visual presentation
+            print ""
     else:
         if args.output == 'csv':
             writer = CsvOutputWriter(columns, args.file_name)
