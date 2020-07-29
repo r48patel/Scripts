@@ -1,13 +1,10 @@
-# from __future__ import print_function
+from __future__ import print_function
 import httplib2
 import os
 import re
-from fuzzywuzzy import process
-from apiclient import discovery
-from apiclient import errors
-import oauth2client
-from oauth2client import client
-from oauth2client import tools
+# from fuzzywuzzy import process
+# from apiclient import discovery
+# from apiclient import errors
 import base64
 import email
 import collections
@@ -19,6 +16,11 @@ import signal
 import argparse
 import threading
 import sys
+import pickle
+from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 
 #*********************************************
 # Current Issues
@@ -88,7 +90,7 @@ class processEmails (threading.Thread):
         threading.Thread.__init__(self)
         self.user_id = user_id
         # Each thread has its own service so it doesn't interfere with others.
-        self.service = discovery.build('gmail', 'v1', http=get_credentials().authorize(httplib2.Http()))
+        self.service = service = build('gmail', 'v1', credentials=get_credentials())
         self.message_list = message_list
     
     def run(self):
@@ -116,10 +118,10 @@ class processEmails (threading.Thread):
                             email_list.append(Email_Object(message_id['id'], from_who, ''))
                         elif email_sub:
                             email_list.append(Email_Object(message_id['id'], '', email_sub))
-                    except KeyError, err:
+                    except KeyError as err:
                         print ("Issue with message ID: " + message_id['id'])
                         print ('Error: %s' % err)
-                except KeyError, error:
+                except KeyError as error:
                     print('Issue with message ID: ' + message_id['id'])
                     print('Error: %s' % error)
                 
@@ -153,7 +155,7 @@ def modify_message_labels(service, user_id, msg_id, msg_labels):
     print ('Label changes for message with id ' + msg_id + ': %s' % msg_labels)
 
     return message
-  except errors.HttpError, error:
+  except HttpError as error:
     print ('An error occurred: %s' % error)
 
 
@@ -168,7 +170,7 @@ def delete_message(service, user_id, message_id):
   try:
     service.users().messages().delete(userId=user_id, id=message_id).execute()
     print ('Message with id: %s deleted successfully.' % message_id)
-  except errors.HttpError, error:
+  except HttpError as error:
     print ('An error occurred: %s' % error)
 
 def create_label_mapping(service, user_id):
@@ -195,20 +197,26 @@ def get_credentials():
     Returns:
         Credentials, the obtained credential.
     """
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    credential_path = os.path.join(credential_dir, 'gmail-tool.json')
-    if not os.path.exists(credential_dir):
-        print('Please run command \'python auth_gmail.py\' to create oauth token.')
-        sys.exit()
-    else:
-        store = oauth2client.file.Storage(credential_path)
-        credentials = store.get()
-        if not credentials or credentials.invalid:
-            print('Please run command \'python auth_gmail.py\' to recreate oauth token.')
-            sys.exit()
+    creds = None
+    # The file token.pickle stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first
+    # time.
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
 
-    return credentials
+    return creds
 
 
 def main():
@@ -240,9 +248,7 @@ def main():
 
     email_counted = []
     user_id = 'me'
-    credentials = get_credentials()
-    http = credentials.authorize(httplib2.Http())
-    service = discovery.build('gmail', 'v1', http=http)
+    service = build('gmail', 'v1', credentials=get_credentials())
     input_file = ''
     columns = ["Message ID", "Email", "Count"]
 
@@ -266,7 +272,7 @@ def main():
             if 'Subject' in line:
                 subject_included=True 
                 continue
-            print "Processing line: %s " % counter
+            print ("Processing line: %s " % counter)
             if subject_included:
                 message_id=line[0]
                 email=line[1]
@@ -292,7 +298,7 @@ def main():
                 print(' email: ' + email)
                 print(' subject: ' + subject)
                 print('') #Visual presentation
-            print ""
+            print ("")
     else:
         if args.output == 'csv':
             writer = CsvOutputWriter(columns, args.file_name)
@@ -326,7 +332,7 @@ def main():
                 print('Total threads done %s out of %s' % (len(thread_list) - (threading.active_count() - 1), len(thread_list)))
                 time.sleep(1)
             except KeyboardInterrupt:
-                print "\nGoodbye!"
+                print ("\nGoodbye!")
                 sys.exit() # Kill all threads
         print('Total threads done %s out of %s' % (len(thread_list) - (threading.active_count() - 1), len(thread_list)))
 
